@@ -12,24 +12,50 @@ def train(num_epochs=1):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Load MNIST dataset
-    transform = transforms.Compose([
+    # Even more minimal augmentation
+    transform_train = transforms.Compose([
+        transforms.RandomRotation(2),  # Further reduced rotation
+        transforms.RandomAffine(degrees=0, translate=(0.02, 0.02)),  # Minimal translation
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
     
-    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, shuffle=True)
+    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform_train)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, 
+        batch_size=16,  # Further reduced batch size
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True
+    )
     
-    # Initialize model
     model = MNISTModel().to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters())
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.01)  # Further reduced label smoothing
+    
+    # Modified optimizer settings
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=0.008,  # Increased learning rate
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=1e-5  # Reduced weight decay
+    )
+    
+    # Modified scheduler
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=0.008,
+        epochs=num_epochs,
+        steps_per_epoch=len(train_loader),
+        pct_start=0.03,  # Even faster warmup
+        div_factor=10,
+        final_div_factor=50,
+        anneal_strategy='cos'
+    )
     
     total_params = sum(p.numel() for p in model.parameters())
     print(f"\nTotal model parameters: {total_params:,}")
     
-    # Training loop for multiple epochs
     print("\nTraining progress:")
     print("="*50)
     
@@ -47,11 +73,19 @@ def train(num_epochs=1):
         
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
+            
+            # Mixed precision training
             output = model(data)
             loss = criterion(output, target)
+            
             loss.backward()
+            
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
+            scheduler.step()
             
             # Calculate batch statistics
             running_loss += loss.item()
@@ -59,12 +93,14 @@ def train(num_epochs=1):
             running_correct += pred.eq(target).sum().item()
             running_total += target.size(0)
             
-            if batch_idx % 100 == 0:
+            if batch_idx % 20 == 0:
                 progress = (batch_idx / total_batches) * 100
                 current_accuracy = 100. * running_correct / running_total
                 avg_loss = running_loss / (batch_idx + 1)
+                current_lr = scheduler.get_last_lr()[0]
                 print(f"Progress: {progress:.1f}% [{batch_idx}/{total_batches}]")
                 print(f"Loss: {avg_loss:.4f}, Training Accuracy: {current_accuracy:.2f}%")
+                print(f"Learning Rate: {current_lr:.6f}")
         
         # Epoch statistics
         epoch_accuracy = 100. * running_correct / running_total

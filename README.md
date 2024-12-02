@@ -1,5 +1,7 @@
 # MNIST Classification with CI/CD Pipeline
 
+[![ML Pipeline](https://github.com/althafkk/S5MNISTCICDCLASS/actions/workflows/ml-pipeline.yml/badge.svg)](https://github.com/althafkk/S5MNISTCICDCLASS/actions/workflows/ml-pipeline.yml)
+
 A deep learning project that implements a CNN model for MNIST digit classification with automated testing and CI/CD pipeline integration.
 
 ## Project Structure
